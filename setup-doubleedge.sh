@@ -48,6 +48,28 @@ if [[ "${1:-}" == "--kill" ]]; then
   exit 0
 fi
 
+# ── load .env (centralised secrets) ──────────────────────────
+# DeepSeek (DS / pane 0) のキーをここで一括ロードし、起動する全 pane に継承させる。
+# claude (BLADE) と agy (AG) はサブスクリプション/OAuth のためキー不要。
+ENV_FILE="${WORKDIR}/.env"
+if [[ -f "${ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+  set +a
+  log "Loaded secrets from .env"
+else
+  warn ".env not found — run ./install.sh or 'cp .env.example .env' and set DEEPSEEK_API_KEY"
+fi
+
+# DeepSeek は OpenAI 互換 API。cline が拾えるよう OpenAI 互換エイリアスも公開する。
+if [[ -n "${DEEPSEEK_API_KEY:-}" ]]; then
+  export OPENAI_API_KEY="${OPENAI_API_KEY:-${DEEPSEEK_API_KEY}}"
+  export OPENAI_BASE_URL="${OPENAI_BASE_URL:-${DEEPSEEK_BASE_URL:-https://api.deepseek.com}}"
+else
+  warn "DEEPSEEK_API_KEY is empty — DS (cline) may fail to authenticate"
+fi
+
 # ── preflight checks ─────────────────────────────────────────
 command -v tmux  &>/dev/null || die "tmux not found"
 command -v cline &>/dev/null || die "cline CLI not found (npm i -g cline)"

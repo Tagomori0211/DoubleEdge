@@ -1,0 +1,25 @@
+# ============================================================
+# DoubleEdge — environment requirements
+#
+# install.sh がこのファイルを解析して依存を導入する。
+# 形式（空白区切り・# 以降はコメント）:
+#   <name>  <method>  <package-or-hint>  [min-version]
+#
+#   method = system : OS パッケージマネージャ (apt/brew/dnf/pacman)
+#            npm    : npm i -g <package>
+#            manual : 手動インストール（URL/ヒントを表示するのみ）
+#
+# Python プロジェクトではないため pip 用ではない点に注意。
+# ============================================================
+
+# ── system tools ────────────────────────────────────────────
+tmux    system  tmux    3.0
+git     system  git
+curl    system  curl
+
+# ── npm global CLIs ─────────────────────────────────────────
+cline   npm     cline                       # pane 0: DS (DeepSeek V4 Pro) control plane
+claude  npm     @anthropic-ai/claude-code   # pane 1: BLADE (Claude Code) quality gate
+
+# ── manual install ──────────────────────────────────────────
+agy     manual  https://antigravity.google  # pane 2-4: AG x3 (Antigravity CLI / Gemini)
