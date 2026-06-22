@@ -39,28 +39,8 @@ tmux session: doubleedge
 
 ### エージェント連携フロー
 
-```mermaid
-graph TD
-    Human([ユーザー / CLI]) --> DS[pane 0: DS / コントロールプレーン]
-    DS -->|タスク分解・並列投入| AG_Group{並列実行部隊}
-    
-    subgraph Parallel Engines [pane 2-4: Antigravity CLI]
-        AG_Group --> AG1[AG-1: Implementer]
-        AG_Group --> AG2[AG-2: Auditor]
-        AG_Group --> AG3[AG-3: Alternative]
-    end
+![architecture](./docs/mermaid.svg)
 
-    AG1 -->|実装コード| BLADE[pane 1: BLADE / Claude Code]
-    AG2 -->|指摘事項| BLADE
-    AG3 -->|代替アプローチ| BLADE
-    
-    BLADE -->|整合性検証・マージ判定| DS
-    DS -->|最終統合| Human
-
-    %% クォータ監視
-    WATCH[pane 5: WATCH / Watchdog] -.->|API制限を監視| Parallel Engines
-    WATCH -.->|制限検知時に STOP_SIGNAL 送信| DS
-```
 
 ### 動作モード
 

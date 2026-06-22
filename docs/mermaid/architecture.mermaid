@@ -1,0 +1,42 @@
+flowchart TD
+    Human([Human / CLI])
+
+    Human -->|全体指示| DS
+
+    DS["pane 0: DS
+    DeepSeek V4 Pro
+    コントロールプレーン"]
+
+    subgraph AG ["pane 2–4: Antigravity CLI — 並列実行"]
+        AG1["AG-1
+        Implementer
+        速度優先"]
+        AG2["AG-2
+        Auditor
+        GOZEN式監査"]
+        AG3["AG-3
+        Alternative
+        独立代替実装"]
+    end
+
+    DS -->|タスク分解・並列投入| AG1
+    DS -->|タスク分解・並列投入| AG2
+    DS -->|タスク分解・並列投入| AG3
+
+    BLADE["pane 1: BLADE
+    Claude Code
+    整合・結合・却下"]
+
+    AG1 -->|実装コード| BLADE
+    AG2 -->|指摘事項| BLADE
+    AG3 -->|代替アプローチ| BLADE
+
+    BLADE -->|ACCEPT / PARTIAL / REJECT| DS
+    DS -->|最終統合| Human
+
+    WATCH["pane 5: Watchdog
+    quota grep
+    30秒ポーリング"]
+
+    WATCH -.->|STOP_SIGNAL| DS
+    WATCH -.-|quota 監視| AG
