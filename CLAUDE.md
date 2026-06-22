@@ -1,5 +1,9 @@
 # CLAUDE.md — DoubleEdge context for Claude Code (BLADE)
-
+---
+# 基本骨子
+## 求める役割
+- role: BLADE=Claude Code
+---
 ## このファイルの役割
 
 pane 1（BLADE）で起動した Claude Code がこのプロジェクトのコンテキストを理解するための定義。
@@ -35,7 +39,7 @@ DS から以下の形式で来る：
 
 不一致3回到達時の最終裁定として、どちらの主張が正しいかを判断して返す。
 
-## 制約
+# 制約
 
 - 自分でコードを書いて pane 2〜4 の代わりをしない
 - 判定結果は必ず `ACCEPT` / `PARTIAL:N` / `REJECT:reason` のプレフィックスで始める

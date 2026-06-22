@@ -8,7 +8,7 @@ watchdog（pane 5）から以下の形式で届く：
 [DoubleEdge watchdog] STOP_SIGNAL:QUOTA pane=<N> tool=<name> pattern='<検出文字列>' Resets in Xh Ym Zs.
 ```
 
-## DSのハンドラロジック
+## DeepSeek(DS)のハンドラロジック
 
 ### 受信時の即時アクション
 
