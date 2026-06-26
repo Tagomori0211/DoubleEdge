@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # DoubleEdge — tmux-based multi-agent orchestration loop (setup-doubleedge.ps1)
 #
 # Windows (PowerShell) 環境用の起動・管理スクリプトです。
@@ -242,7 +242,7 @@ Log-Info "Starting agy AG-1 (Implementer) in pane 2..."
 tmux send-keys -t "${Session}:0.2" "echo '[AG-1] agy Implementer — standby'; agy" Enter
 
 Log-Info "Starting agy AG-2 (Auditor) in pane 3..."
-tmux send-keys -t "$Session:0.3" "echo '[AG-2] agy Auditor (GOZEN) — standby'; agy" Enter
+tmux send-keys -t "${Session}:0.3" "echo '[AG-2] agy Auditor (GOZEN) — standby'; agy" Enter
 
 Log-Info "Starting agy AG-3 (Alternative) in pane 4..."
 tmux send-keys -t "${Session}:0.4" "echo '[AG-3] agy Alternative — standby'; agy" Enter

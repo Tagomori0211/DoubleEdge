@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # DoubleEdge — Windows environment bootstrap (install.ps1)
 #
 # requirements.txt を解析し、不足している依存（system / npm / manual）を
@@ -141,7 +141,7 @@ function Install-Npm {
 
 function Install-Manual {
     param([string]$Name, [string]$Hint)
-    Log-Warn "$Name: 手動インストールが必要です — $Hint"
+    Log-Warn "${Name}: 手動インストールが必要です — $Hint"
     $Manual += "$Name ($Hint)"
 }
 
