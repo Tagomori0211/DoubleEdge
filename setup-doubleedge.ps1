@@ -1,4 +1,4 @@
-﻿# ============================================================
+# ============================================================
 # DoubleEdge — tmux-based multi-agent orchestration loop (setup-doubleedge.ps1)
 #
 # Windows (PowerShell) 環境用の起動・管理スクリプトです。
@@ -11,11 +11,12 @@
 
 param (
     [string]$Session = "doubleedge",
+    [string]$WorkDir = "",
     [switch]$Kill
 )
 
 # ── 設定 ──────────────────────────────────────────────────
-$WORKDIR = $PWD.Path
+$WORKDIR = if ($WorkDir) { Resolve-Path $WorkDir } else { $PWD.Path }
 $WATCH_INTERVAL = 30   # クォータ監視の間隔（秒）
 $LogDir = Join-Path $WORKDIR ".doubleedge\logs"
 $SignalFile = Join-Path $WORKDIR ".doubleedge\stop_signal"

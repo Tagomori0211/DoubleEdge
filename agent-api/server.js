@@ -1,0 +1,356 @@
+const express = require('express');
+const cors = require('cors');
+const { exec, spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+const SESSION_NAME = process.env.SESSION_NAME || 'doubleedge';
+
+// プロジェクトのルートパスを取得
+const ROOT_DIR = path.resolve(__dirname, '..');
+
+// 簡易 .env 読み込み処理（dotenv依存なしで動作させるため）
+const dotenvPath = path.join(ROOT_DIR, '.env');
+if (fs.existsSync(dotenvPath)) {
+    const content = fs.readFileSync(dotenvPath, 'utf8');
+    content.split(/\r?\n/).forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return;
+        const match = trimmed.match(/^([^=]+)=(.*)$/);
+        if (match) {
+            const key = match[1].trim();
+            let val = match[2].trim();
+            if (val.startsWith('"') && val.endsWith('"')) {
+                val = val.substring(1, val.length - 1);
+            } else if (val.startsWith("'") && val.endsWith("'")) {
+                val = val.substring(1, val.length - 1);
+            }
+            process.env[key] = val;
+        }
+    });
+}
+
+// デバッグ用のモックモードフラグ
+const MOCK_MODE = process.env.MOCK_MODE === 'true' || false;
+
+app.use(cors());
+app.use(express.json());
+
+// リクエストログ出力ミドルウェア
+app.use((req, res, next) => {
+    console.log(`[API Log] ${req.method} ${req.url} - ${new Date().toISOString()}`);
+    next();
+});
+
+// モック用の状態管理
+let isMockRunning = false;
+let mockActiveWorkdir = ROOT_DIR;
+let mockLogs = {};
+
+function initMockLogs() {
+    mockLogs = {
+        0: `[DS] DeepSeek V4 Pro — control plane ready (Workspace: ${mockActiveWorkdir})\n`,
+        1: `[BLADE] Claude Code — integration layer ready\n`,
+        2: `[AG-1] agy Implementer — standby\n`,
+        3: `[AG-2] agy Auditor (GOZEN) — standby\n`,
+        4: `[AG-3] agy Alternative — standby\n`,
+        5: `[watchdog] started - interval 30s, watching panes 1-4\n`
+    };
+}
+initMockLogs();
+
+const mockTemplates = {
+    0: [
+        '[DS] Analyzing user request: "Implement WebUI dashboard"',
+        '[DS] Decomposing tasks for subagents...',
+        '[DS] Dispatching implementation subtask to AG-1',
+        '[DS] Waiting for auditor review from AG-2...',
+        '[DS] Review received. AG-2 approved the changes.',
+        '[DS] Invoking BLADE (Claude Code) for integration...',
+        '[DS] Integration completed successfully. Task done.'
+    ],
+    1: [
+        '[BLADE] Scanning files for security vulnerability...',
+        '[BLADE] Run static analyzer... OK',
+        '[BLADE] Verifying code integrity and style consistency...',
+        '[BLADE] Diff check: +4 lines, -2 lines in page.js',
+        '[BLADE] Status: ACCEPTED'
+    ],
+    2: [
+        '[AG-1] [ROLE: Implementer] Active',
+        '[AG-1] Writing CSS classes in page.module.css...',
+        '[AG-1] Designing 3x2 grid layout and glassmorphism cards...',
+        '[AG-1] WebUI page.js file updated.',
+        '[AG-1] [DONE: AG-1] WebUI implementation complete'
+    ],
+    3: [
+        '[AG-2] [ROLE: Auditor] Active',
+        '[AG-2] Auditing implementer\'s proposed changes...',
+        '[AG-2] Check: check for memory leak in EventSource hooks... OK',
+        '[AG-2] Check: viewport responsiveness... OK',
+        '[AG-2] [DONE: AG-2] LGTM. No critical vulnerabilities found.'
+    ],
+    4: [
+        '[AG-3] [ROLE: Alternative] Active',
+        '[AG-3] Exploring alternative layout using TailwindCSS...',
+        '[AG-3] Compared with Vanilla CSS. Vanilla CSS chosen for better flexibility.',
+        '[AG-3] [DONE: AG-3] Alternative design notes documented.'
+    ],
+    5: [
+        '[watchdog] check quota: ok (Gemini Pro token remaining: 84%)',
+        '[watchdog] check quota: ok (Gemini Pro token remaining: 81%)',
+        '[watchdog] check quota: ok (Gemini Pro token remaining: 79%)',
+        '[watchdog] check quota: ok (Gemini Pro token remaining: 79%)'
+    ]
+};
+
+// モックの自動ログ生成ループ
+let mockInterval = null;
+function startMockLogs(workdir) {
+    mockActiveWorkdir = workdir;
+    initMockLogs();
+    
+    if (mockInterval) clearInterval(mockInterval);
+    
+    let step = 0;
+    mockInterval = setInterval(() => {
+        if (!isMockRunning) return;
+        
+        const timestamp = new Date().toLocaleTimeString();
+        
+        Object.keys(mockTemplates).forEach(paneIndex => {
+            const templates = mockTemplates[paneIndex];
+            const logLine = templates[step % templates.length];
+            mockLogs[paneIndex] += `[${timestamp}] ${logLine}\n`;
+        });
+        step++;
+    }, 3000);
+}
+
+function stopMockLogs() {
+    if (mockInterval) {
+        clearInterval(mockInterval);
+        mockInterval = null;
+    }
+    mockActiveWorkdir = ROOT_DIR;
+    initMockLogs();
+}
+
+// tmux コマンドのラッパーヘルパー
+function runTmux(args, cwd = ROOT_DIR) {
+    return new Promise((resolve) => {
+        const env = { ...process.env };
+        exec(`tmux ${args}`, { env, cwd }, (error, stdout, stderr) => {
+            if (error) {
+                resolve({ success: false, code: error.code, stdout, stderr });
+            } else {
+                resolve({ success: true, code: 0, stdout, stderr });
+            }
+        });
+    });
+}
+
+// 1. セッションステータスの取得
+app.get('/api/status', async (req, res) => {
+    if (MOCK_MODE) {
+        const panes = [0, 1, 2, 3, 4, 5].map(index => ({
+            index,
+            title: ['DS', 'BLADE', 'AG-1', 'AG-2', 'AG-3', 'WATCH'][index],
+            active: isMockRunning
+        }));
+        return res.json({
+            running: isMockRunning,
+            session: SESSION_NAME,
+            workdir: mockActiveWorkdir,
+            panes
+        });
+    }
+
+    const check = await runTmux(`has-session -t ${SESSION_NAME}`);
+    if (!check.success) {
+        return res.json({
+            running: false,
+            session: SESSION_NAME,
+            workdir: ROOT_DIR,
+            panes: []
+        });
+    }
+
+    const panesCheck = await runTmux(`list-panes -t ${SESSION_NAME}:0 -F "#{pane_index}:#{pane_title}:#{pane_active}"`);
+    if (!panesCheck.success) {
+        return res.json({
+            running: true,
+            session: SESSION_NAME,
+            workdir: ROOT_DIR,
+            panes: []
+        });
+    }
+
+    const panes = panesCheck.stdout.trim().split('\n').map(line => {
+        const [index, title, active] = line.split(':');
+        return {
+            index: parseInt(index, 10),
+            title: title || `Pane ${index}`,
+            active: active === '1'
+        };
+    });
+
+    res.json({
+        running: true,
+        session: SESSION_NAME,
+        workdir: ROOT_DIR, // 本番モード時も本来はプロセス開始CWD等を取得する
+        panes
+    });
+});
+
+// 2. リポジトリ一覧の取得
+app.get('/api/repositories', (req, res) => {
+    const reposStr = process.env.DOUBLEEDGE_REPOSITORIES || '';
+    const repositories = reposStr ? reposStr.split(',').map(p => p.trim()) : [];
+    res.json({ repositories });
+});
+
+// 3. 特定のペインのログをSSEでストリーミング
+app.get('/api/logs/:pane', async (req, res) => {
+    const paneIndex = parseInt(req.params.pane, 10);
+    if (isNaN(paneIndex) || paneIndex < 0 || paneIndex > 5) {
+        return res.status(400).json({ error: 'Invalid pane index' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    let lastOutput = '';
+
+    const intervalId = setInterval(async () => {
+        if (MOCK_MODE) {
+            if (!isMockRunning) {
+                res.write(`data: ${JSON.stringify({ error: 'Session not running' })}\n\n`);
+                return;
+            }
+            const currentOutput = mockLogs[paneIndex];
+            if (currentOutput !== lastOutput) {
+                lastOutput = currentOutput;
+                res.write(`data: ${JSON.stringify({ logs: currentOutput })}\n\n`);
+            }
+            return;
+        }
+
+        const check = await runTmux(`has-session -t ${SESSION_NAME}`);
+        if (!check.success) {
+            res.write(`data: ${JSON.stringify({ error: 'Session not running' })}\n\n`);
+            return;
+        }
+
+        const capture = await runTmux(`capture-pane -t ${SESSION_NAME}:0.${paneIndex} -p`);
+        if (capture.success) {
+            const currentOutput = capture.stdout;
+            if (currentOutput !== lastOutput) {
+                lastOutput = currentOutput;
+                res.write(`data: ${JSON.stringify({ logs: currentOutput })}\n\n`);
+            }
+        } else {
+            res.write(`data: ${JSON.stringify({ error: 'Failed to capture pane logs' })}\n\n`);
+        }
+    }, 1000);
+
+    req.on('close', () => {
+        clearInterval(intervalId);
+        res.end();
+    });
+});
+
+// 4. セッションの起動・停止
+app.post('/api/control', async (req, res) => {
+    const { action, workdir } = req.body;
+    console.log(`[API Control] Received action: ${action}, workdir: ${workdir} (MOCK_MODE: ${MOCK_MODE})`);
+    
+    // 指定されたリポジトリパス。なければROOT_DIR
+    const targetDir = workdir || ROOT_DIR;
+
+    if (MOCK_MODE) {
+        if (action === 'start') {
+            if (isMockRunning) {
+                return res.status(400).json({ error: 'Session already running' });
+            }
+            isMockRunning = true;
+            startMockLogs(targetDir);
+            console.log(`[API Control] Mock Session Started on: ${targetDir}`);
+            return res.json({ message: 'Mock Session start initiated', workdir: targetDir });
+        } else if (action === 'stop') {
+            if (!isMockRunning) {
+                return res.status(400).json({ error: 'Session not running' });
+            }
+            isMockRunning = false;
+            stopMockLogs();
+            console.log(`[API Control] Mock Session Stopped`);
+            return res.json({ message: 'Mock Session stopped successfully' });
+        } else {
+            return res.status(400).json({ error: 'Invalid action' });
+        }
+    }
+
+    if (action === 'start') {
+        const check = await runTmux(`has-session -t ${SESSION_NAME}`, targetDir);
+        if (check.success) {
+            console.log(`[API Control] Start failed: Session ${SESSION_NAME} already running`);
+            return res.status(400).json({ error: 'Session already running' });
+        }
+
+        try {
+            console.log(`[API Control] Spawning setup-doubleedge.ps1 on ${targetDir}`);
+            const ps = spawn('powershell.exe', [
+                '-ExecutionPolicy', 'Bypass',
+                '-File', path.join(ROOT_DIR, 'setup-doubleedge.ps1'),
+                '-Session', SESSION_NAME,
+                '-WorkDir', targetDir
+            ], {
+                cwd: targetDir,
+                detached: true,
+                stdio: 'ignore'
+            });
+
+            ps.on('error', (err) => {
+                console.error(`[API Control] Spawn process error:`, err);
+            });
+
+            ps.unref();
+            console.log(`[API Control] Process spawned successfully.`);
+            return res.json({ message: 'Session start initiated', workdir: targetDir });
+        } catch (e) {
+            console.error(`[API Control] Exception during spawn:`, e);
+            return res.status(500).json({ error: 'Failed to launch session', details: e.message });
+        }
+
+    } else if (action === 'stop') {
+        console.log(`[API Control] Stopping session ${SESSION_NAME}...`);
+        const check = await runTmux(`has-session -t ${SESSION_NAME}`, targetDir);
+        if (!check.success) {
+            console.log(`[API Control] Stop failed: Session not running`);
+            return res.status(400).json({ error: 'Session not running' });
+        }
+
+        exec(`powershell.exe -ExecutionPolicy Bypass -File "${path.join(ROOT_DIR, 'setup-doubleedge.ps1')}" -Kill`, { cwd: targetDir }, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`[API Control] Stop error:`, stderr);
+                return res.status(500).json({ error: 'Failed to stop session', details: stderr });
+            }
+            console.log(`[API Control] Session stopped successfully.`);
+            res.json({ message: 'Session stopped successfully', output: stdout });
+        });
+
+    } else {
+        console.log(`[API Control] Invalid action: ${action}`);
+        res.status(400).json({ error: 'Invalid action' });
+    }
+});
+
+// サーバー起動
+app.listen(PORT, '127.0.0.1', () => {
+    console.log(`DoubleEdge Agent API listening on port ${PORT} (MOCK_MODE: ${MOCK_MODE})`);
+    console.log(`Root workspace directory: ${ROOT_DIR}`);
+});
