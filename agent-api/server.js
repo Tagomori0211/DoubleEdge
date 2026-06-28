@@ -212,56 +212,38 @@ app.get('/api/repositories', (req, res) => {
     res.json({ repositories });
 });
 
-// 3. 特定のペインのログをSSEでストリーミング
-app.get('/api/logs/:pane', async (req, res) => {
-    const paneIndex = parseInt(req.params.pane, 10);
-    if (isNaN(paneIndex) || paneIndex < 0 || paneIndex > 5) {
-        return res.status(400).json({ error: 'Invalid pane index' });
+// 3. 全ペインのログをまとめて取得する (ポーリング用)
+app.get('/api/logs', async (req, res) => {
+    const logs = {};
+    if (MOCK_MODE) {
+        if (!isMockRunning) {
+            return res.json({ error: 'Session not running', logs: {} });
+        }
+        for (let i = 0; i <= 5; i++) {
+            logs[i] = mockLogs[i] || '';
+        }
+        return res.json({ logs });
     }
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders();
+    const check = await runTmux(`has-session -t ${SESSION_NAME}`);
+    if (!check.success) {
+        return res.json({ error: 'Session not running', logs: {} });
+    }
 
-    let lastOutput = '';
-
-    const intervalId = setInterval(async () => {
-        if (MOCK_MODE) {
-            if (!isMockRunning) {
-                res.write(`data: ${JSON.stringify({ error: 'Session not running' })}\n\n`);
-                return;
-            }
-            const currentOutput = mockLogs[paneIndex];
-            if (currentOutput !== lastOutput) {
-                lastOutput = currentOutput;
-                res.write(`data: ${JSON.stringify({ logs: currentOutput })}\n\n`);
-            }
-            return;
+    try {
+        const promises = [];
+        for (let i = 0; i <= 5; i++) {
+            promises.push(runTmux(`capture-pane -t ${SESSION_NAME}:0.${i} -p`));
         }
-
-        const check = await runTmux(`has-session -t ${SESSION_NAME}`);
-        if (!check.success) {
-            res.write(`data: ${JSON.stringify({ error: 'Session not running' })}\n\n`);
-            return;
+        const results = await Promise.all(promises);
+        for (let i = 0; i <= 5; i++) {
+            logs[i] = results[i].success ? results[i].stdout : '';
         }
-
-        const capture = await runTmux(`capture-pane -t ${SESSION_NAME}:0.${paneIndex} -p`);
-        if (capture.success) {
-            const currentOutput = capture.stdout;
-            if (currentOutput !== lastOutput) {
-                lastOutput = currentOutput;
-                res.write(`data: ${JSON.stringify({ logs: currentOutput })}\n\n`);
-            }
-        } else {
-            res.write(`data: ${JSON.stringify({ error: 'Failed to capture pane logs' })}\n\n`);
-        }
-    }, 1000);
-
-    req.on('close', () => {
-        clearInterval(intervalId);
-        res.end();
-    });
+        res.json({ logs });
+    } catch (err) {
+        console.error('Failed to capture logs:', err);
+        res.status(500).json({ error: 'Failed to capture logs' });
+    }
 });
 
 // 4. セッションの起動・停止
@@ -346,6 +328,63 @@ app.post('/api/control', async (req, res) => {
     } else {
         console.log(`[API Control] Invalid action: ${action}`);
         res.status(400).json({ error: 'Invalid action' });
+    }
+});
+
+// 5. 特定のペインへの指示の送信 (send-keys)
+app.post('/api/input', async (req, res) => {
+    const { pane, text } = req.body;
+    const paneIndex = parseInt(pane, 10);
+    console.log(`[API Input] Received input for pane: ${paneIndex}, text: "${text}" (MOCK_MODE: ${MOCK_MODE})`);
+
+    if (isNaN(paneIndex) || paneIndex < 0 || paneIndex > 5) {
+        return res.status(400).json({ error: 'Invalid pane index' });
+    }
+    if (!text || text.trim() === '') {
+        return res.status(400).json({ error: 'Empty input text' });
+    }
+
+    if (MOCK_MODE) {
+        if (!isMockRunning) {
+            return res.status(400).json({ error: 'Session not running' });
+        }
+        // ユーザー入力を該当ペインのモックログに反映させる
+        const timestamp = new Date().toLocaleTimeString();
+        mockLogs[paneIndex] += `[${timestamp}] [User Input]: ${text}\n`;
+        
+        // Cline 割り込みのシミュレート：自動で日本語で肯定的なモック返答を流す
+        setTimeout(() => {
+            if (isMockRunning) {
+                const replyTimestamp = new Date().toLocaleTimeString();
+                let mockResponse = '';
+                if (paneIndex === 0) {
+                    mockResponse = `[DS] [ユーザーからの割り込み指示受信]: "${text}"\n[DS] 了解しました。指示内容に基づき、タスクを再構成して実行します。\n`;
+                } else {
+                    mockResponse = `[Pane ${paneIndex}] [割り込み指示受信]: "${text}" を処理中...\n`;
+                }
+                mockLogs[paneIndex] += `[${replyTimestamp}] ${mockResponse}`;
+            }
+        }, 1500);
+
+        return res.json({ message: 'Mock input accepted and processed' });
+    }
+
+    const check = await runTmux(`has-session -t ${SESSION_NAME}`);
+    if (!check.success) {
+        return res.status(400).json({ error: 'Session not running' });
+    }
+
+    // Windows PowerShell経由で tmux send-keys を実行
+    // 改行を含まずに送信し、最後に Enter を送信
+    const sendCommand = `send-keys -t ${SESSION_NAME}:0.${paneIndex} "${text.replace(/"/g, '\\"')}" Enter`;
+    const sendResult = await runTmux(sendCommand);
+    
+    if (sendResult.success) {
+        console.log(`[API Input] Successfully sent keys to pane ${paneIndex}.`);
+        res.json({ message: 'Input sent successfully' });
+    } else {
+        console.error(`[API Input] Failed to send keys to pane ${paneIndex}:`, sendResult.stderr);
+        res.status(500).json({ error: 'Failed to send input to session', details: sendResult.stderr });
     }
 });
 

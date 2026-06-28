@@ -114,13 +114,19 @@ foreach ($dep in $dependencies) {
 tmux has-session -t "${Session}" 2>$null
 if ($LASTEXITCODE -eq 0) {
     Log-Warn "Session '${Session}' already exists."
-    $ans = Read-Host "  Attach to existing session? [Y/n]"
-    if ($ans -match '^[Yy]$' -or $ans -eq '') {
-        tmux attach-session -t "${Session}"
-        exit 0
-    } else {
+    # APIサーバー等の非対話的なバックグラウンド起動環境を考慮し、Read-Host のフリーズを回避
+    if ($env:DE_NON_INTERACTIVE -eq "true" -or -not [Environment]::UserInteractive) {
+        Log-Info "Non-interactive environment detected. Recreating session '${Session}'..."
         tmux kill-session -t "${Session}" 2>$null
-        Log-Info "Old session destroyed. Recreating..."
+    } else {
+        $ans = Read-Host "  Attach to existing session? [Y/n]"
+        if ($ans -match '^[Yy]$' -or $ans -eq '') {
+            tmux attach-session -t "${Session}"
+            exit 0
+        } else {
+            tmux kill-session -t "${Session}" 2>$null
+            Log-Info "Old session destroyed. Recreating..."
+        }
     }
 }
 

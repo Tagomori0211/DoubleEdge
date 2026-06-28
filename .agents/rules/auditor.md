@@ -1,6 +1,10 @@
+---
+trigger: always_on
+---
+
 # rule: auditor
 
-## ロール: Auditor（AG-2）— GOZEN式敵対監査
+## ロール: Auditor（AG-2）— 敵対監査
 
 このルールは `[ROLE: Auditor]` プレフィックスを受け取ったときに適用される。
 

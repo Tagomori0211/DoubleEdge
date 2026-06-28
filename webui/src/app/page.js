@@ -19,6 +19,8 @@ export default function Home() {
   const [actionLoading, setActionLoading] = useState(false);
   const [repositories, setRepositories] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState('');
+  const [inputText, setInputText] = useState('');
+  const [inputSending, setInputSending] = useState(false);
   const consoleRefs = useRef({});
 
   // 1. セッションステータスの取得（ポーリング）
@@ -62,44 +64,41 @@ export default function Home() {
     return () => clearInterval(interval);
   }, []);
 
-  // 2. SSEによるログのリアルタイムストリーミング
+  // 2. ログ取得（短時間ポーリングによる取得。同時接続数制限回避のため）
+  const fetchLogs = async () => {
+    if (!status.running) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/logs`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setLogs(prev => {
+            let changed = false;
+            const nextLogs = { ...prev };
+            Object.keys(data.logs).forEach(key => {
+              if (prev[key] !== data.logs[key]) {
+                nextLogs[key] = data.logs[key];
+                changed = true;
+              }
+            });
+            return changed ? nextLogs : prev;
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch logs:', err);
+    }
+  };
+
   useEffect(() => {
     if (!status.running) {
       setLogs({ 0: '', 1: '', 2: '', 3: '', 4: '', 5: '' });
       return;
     }
 
-    const eventSources = {};
-
-    PANE_METADATA.forEach(pane => {
-      const source = new EventSource(`${API_BASE}/api/logs/${pane.index}`);
-      
-      source.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.logs) {
-            setLogs(prev => {
-              if (prev[pane.index] === data.logs) return prev;
-              return { ...prev, [pane.index]: data.logs };
-            });
-          } else if (data.error) {
-            console.warn(`Error in SSE stream for pane ${pane.index}:`, data.error);
-          }
-        } catch (e) {
-          console.error('SSE JSON parse error:', e);
-        }
-      };
-
-      source.onerror = () => {
-        source.close();
-      };
-
-      eventSources[pane.index] = source;
-    });
-
-    return () => {
-      Object.values(eventSources).forEach(source => source.close());
-    };
+    fetchLogs();
+    const interval = setInterval(fetchLogs, 1500); // 1.5秒ごとにログ取得
+    return () => clearInterval(interval);
   }, [status.running]);
 
   // 3. ログの自動スクロール
@@ -131,6 +130,29 @@ export default function Home() {
       alert(`API接続エラー: ${err.message}`);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  // 5. 特定のペインへの指示送信 (割り込み)
+  const sendInput = async (paneIndex) => {
+    if (!inputText.trim()) return;
+    setInputSending(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/input`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pane: paneIndex, text: inputText })
+      });
+      if (res.ok) {
+        setInputText('');
+      } else {
+        const err = await res.json();
+        alert(`送信に失敗しました: ${err.error || '不明なエラー'}`);
+      }
+    } catch (err) {
+      alert(`API接続エラー: ${err.message}`);
+    } finally {
+      setInputSending(false);
     }
   };
 
@@ -206,13 +228,39 @@ export default function Home() {
               </div>
               
               {isPaneActive ? (
-                <div
-                  ref={el => consoleRefs.current[pane.index] = el}
-                  className={styles.console}
-                >
-                  {logs[pane.index] || 'Connecting to stream...'}
-                  <span className="terminal-cursor" />
-                </div>
+                <>
+                  <div
+                    ref={el => consoleRefs.current[pane.index] = el}
+                    className={styles.console}
+                  >
+                    {logs[pane.index] || 'Connecting to stream...'}
+                    <span className="terminal-cursor" />
+                  </div>
+                  {pane.index === 0 && (
+                    <div className={styles.chatInputWrapper}>
+                      <input
+                        type="text"
+                        placeholder="Cline (DS) に指示を入力して割り込み (Enterで送信)"
+                        className={styles.chatInput}
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            sendInput(pane.index);
+                          }
+                        }}
+                        disabled={inputSending}
+                      />
+                      <button
+                        className={styles.chatSendBtn}
+                        onClick={() => sendInput(pane.index)}
+                        disabled={inputSending || !inputText.trim()}
+                      >
+                        {inputSending ? '...' : '送信'}
+                      </button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className={styles.offlineMessage}>
                   <span className={styles.offlineIcon}>🔌</span>
